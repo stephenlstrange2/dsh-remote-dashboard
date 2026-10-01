@@ -12,6 +12,7 @@ test('config rejects unsafe exposure', () => {
   assert.throws(() => normalizeConfig({ mode: 'x' }), /mode/)
   assert.throws(() => normalizeConfig({ mode: 'hub', peers: [{ name: 'a', url: 'ftp://x' }] }), /peer/)
   normalizeConfig({ mode: 'agent', host: '0.0.0.0', allowRemote: true, token: 'x'.repeat(16) })
+  normalizeConfig({ mode: 'both', host: '0.0.0.0', allowRemote: true, viewerKey: 'viewer-key-1' }) // hub needs no agent token
 })
 
 test('agent requires bearer token; hub aggregates and flags offline peers', async () => {
@@ -54,6 +55,7 @@ test('agent requires bearer token; hub aggregates and flags offline peers', asyn
   assert.ok(by.dead.error)
   assert.equal(JSON.stringify(fleet).includes(token), false, 'peer tokens never leak to the tablet')
 
+  assert.equal((await fetch(hb + '/v1/snapshot')).status, 404, 'both-mode without token exposes no agent endpoint')
   await hub.close(); await agent.close()
 })
 
