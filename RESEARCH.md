@@ -55,6 +55,24 @@ export function apply(ctx) {
 | B. Own LAN listener + token | The plugin opens its own `0.0.0.0:<port>` HTTP server serving **read-only** JSON plus a shared secret. | Independent of dsh-mobile and works on any old tablet browser. Our own security (read-only reduces the risk). |
 | C. `ctx.connection.fetch` exact routes | Authenticated with the GUI browser cookie. | Needs the GUI token exchange on the tablet. Clunky. |
 
+## 4. Multi-machine requirement (added)
+
+Existing multi-host plugins: dsh-fleet (iframes of full GUIs, controller/managed split), dsh-remote-dsh
+(sidebar row per host), dsh-sev / dsh-multi-end (SSH tunnels), dsh-alpha / dsh-weave (orchestration / mesh).
+None is a read-only, glanceable multi-machine wall dashboard.
+
+Consequences:
+- **dsh-mobile doesn't scale here.** Pairing is per origin and cookie-based, so one page can't
+  aggregate several dsh-mobile origins (cross-origin cookies/CORS). → Option B (own read-only listener + bearer token).
+- **Architecture: agent + hub.**
+  - *Agent* (DSH plugin, on every machine): `GET /v1/snapshot` (ETag) + `GET /v1/events` (SSE), read-only,
+    bearer token, own listener (e.g. `0.0.0.0:3090` or Tailscale IP only).
+  - *Hub* (one place): polls/subscribes to all agents, merges, marks unreachable hosts, serves the
+    tablet page. Can run as the same plugin in `hub` mode, or as a standalone `node hub.mjs` (keeps
+    working when that DSH restarts). Tokens stay on the hub, not the tablet.
+  - *Tablet*: one URL → hub. Landscape grid grouped by machine.
+- Machines in different places → Tailscale recommended (encrypted, no port forwarding).
+
 ### Client options
 
 1. **Static HTML + fetch/SSE served by the plugin.** Zero install: "Add to home screen" as a PWA, with fullscreen kiosk via Fully Kiosk Browser (Android). **Recommended.**

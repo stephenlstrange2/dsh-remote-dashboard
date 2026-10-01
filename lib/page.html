@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0e1116"><title>DSH Monitor</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;background:#0e1116;color:#d8dee9;font:15px/1.35 -apple-system,Roboto,"Segoe UI",sans-serif}
+header{display:flex;gap:16px;align-items:center;padding:10px 16px;background:#151a22;border-bottom:1px solid #232b36;position:sticky;top:0;z-index:2}
+header h1{font-size:16px;margin:0;font-weight:600}.sp{flex:1}.pill{padding:2px 10px;border-radius:999px;background:#232b36;font-size:13px}
+.pill.run{background:#14532d;color:#bbf7d0}.pill.warn{background:#7c2d12;color:#fed7aa}.pill.bad{background:#7f1d1d;color:#fecaca}
+#banner{display:none;margin:12px 16px 0;padding:10px 14px;border-radius:10px;background:#7c2d12;color:#ffedd5}
+#banner b{display:block;margin-bottom:2px}
+main{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px;padding:14px 16px}
+.m{background:#151a22;border:1px solid #232b36;border-radius:12px;overflow:hidden}
+.m.off{opacity:.55}.mh{display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid #232b36}
+.mh h2{font-size:16px;margin:0}.dot{width:10px;height:10px;border-radius:50%;background:#6b7280}.dot.on{background:#22c55e}.dot.off{background:#ef4444}
+.s{padding:9px 14px;border-bottom:1px solid #1b222c;display:grid;grid-template-columns:14px 1fr auto;gap:2px 10px;align-items:baseline}
+.s:last-child{border-bottom:0}.led{width:10px;height:10px;border-radius:50%;background:#374151;align-self:center}.led.run{background:#22c55e;box-shadow:0 0 8px #22c55e}
+.t{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.meta{color:#8b97a8;font-size:12.5px;grid-column:2/4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r{color:#8b97a8;font-size:12.5px;white-space:nowrap}.tool{color:#7dd3fc}.err{padding:8px 14px;color:#fca5a5;font-size:13px}.empty{padding:14px;color:#6b7280}
+</style></head><body>
+<header><h1>DSH Monitor</h1><span id="tot" class="pill"></span><span class="sp"></span><span id="clk" class="pill"></span><span id="st" class="pill"></span></header>
+<div id="banner"></div><main id="grid"></main>
+<script>
+(function(){
+var grid=document.getElementById('grid'),banner=document.getElementById('banner'),st=document.getElementById('st'),clk=document.getElementById('clk'),tot=document.getElementById('tot');
+var last='',failures=0,pollMs=3000,timer=null,data=null;
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function ago(ms){if(ms==null||ms<0)return '–';var s=Math.floor(ms/1000);if(s<60)return s+'s';var m=Math.floor(s/60);if(m<60)return m+'m';var h=Math.floor(m/60);if(h<48)return h+'h '+(m%60)+'m';return Math.floor(h/24)+'d'}
+function k(n){return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':String(n)}
+function base(p){p=String(p||'');var a=p.split('/').filter(Boolean);return a.length?a[a.length-1]:''}
+function render(){
+ if(!data)return;var now=Date.now(),skew=now-data.generatedAt,html='',pend=[],run=0,all=0,off=0;
+ data.machines.forEach(function(m){
+  var s=m.snapshot,on=m.online,lbl=on?'online':(m.error?'offline':'waiting');
+  if(!on)off++;
+  html+='<section class="m'+(on?'':' off')+'"><div class="mh"><span class="dot '+(on?'on':'off')+'"></span><h2>'+esc(m.name)+'</h2><span class="sp" style="flex:1"></span>';
+  if(s){html+='<span class="pill'+(s.totals.running?' run':'')+'">'+s.totals.running+' running</span><span class="pill">'+s.totals.sessions+' sess</span>';}
+  html+='<span class="r">'+(on?(m.local?'local':m.rttMs+'ms'):lbl+(m.ageMs!=null?' · '+ago(m.ageMs+skew):''))+'</span></div>';
+  if(!on&&m.error)html+='<div class="err">'+esc(m.error)+'</div>';
+  if(s){
+   all+=s.totals.sessions;run+=s.totals.running;
+   s.pending.forEach(function(p){pend.push({m:m.name,p:p})});
+   var shown=s.sessions.filter(function(x){return !x.subagent}).slice(0,12);
+   if(!shown.length)html+='<div class="empty">No live sessions</div>';
+   shown.forEach(function(x){
+    var meta=[];if(x.currentTool)meta.push('<span class="tool">▶ '+esc(x.currentTool)+'</span>');
+    if(x.cwd)meta.push(esc(base(x.cwd)));if(x.turn)meta.push('turn '+x.turn);
+    if(x.tokens.in||x.tokens.out)meta.push(k(x.tokens.in)+'↓ '+k(x.tokens.out)+'↑');
+    if(x.activeJobs)meta.push(x.activeJobs+' job'+(x.activeJobs>1?'s':''));
+    if(x.goal)meta.push('goal '+x.goal.rounds+'/'+(x.goal.max||'∞'));
+    html+='<div class="s"><span class="led'+(x.running?' run':'')+'"></span><span class="t">'+esc(x.title||x.id.slice(0,8))+'</span><span class="r">'+ago(now-x.lastActivity-skew+0)+'</span><span class="meta">'+meta.join(' · ')+'</span></div>';
+   });
+  }
+  html+='</section>';
+ });
+ grid.innerHTML=html||'<div class="empty">No machines configured</div>';
+ tot.textContent=data.machines.length+' machines · '+run+'/'+all+' running';tot.className='pill'+(run?' run':'');
+ if(pend.length){banner.style.display='block';banner.innerHTML=pend.map(function(q){return '<b>⚠ '+esc(q.m)+': '+esc(q.p.kind)+' – '+esc(q.p.title)+'</b>'+esc(q.p.detail)}).join('')}else banner.style.display='none';
+ document.title=(pend.length?'('+pend.length+') ':'')+'DSH Monitor';
+}
+function tick(){
+ fetch('api/fleet',{credentials:'same-origin',cache:'no-store'}).then(function(r){
+  if(r.status===401){throw new Error('unauthorized – open the page once with ?key=VIEWER_KEY')}
+  if(!r.ok)throw new Error('HTTP '+r.status);return r.text()}).then(function(t){
+  failures=0;st.textContent='live';st.className='pill run';
+  if(t!==last){last=t;data=JSON.parse(t);pollMs=data.pollMs||3000;}
+  render();
+ }).catch(function(e){failures++;st.textContent='hub unreachable'+(failures>1?' ('+failures+')':'');st.className='pill bad';if(String(e.message).indexOf('unauthorized')===0)banner.style.display='block',banner.textContent=e.message;});
+}
+function loop(){tick();clearTimeout(timer);timer=setTimeout(loop,Math.max(2000,pollMs))}
+document.addEventListener('visibilitychange',function(){if(!document.hidden)loop()});
+setInterval(function(){var d=new Date();clk.textContent=('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);if(data)render()},1000);
+// best-effort keep-awake (needs a secure context; silently ignored otherwise)
+try{if(navigator.wakeLock){var wl=function(){navigator.wakeLock.request('screen').catch(function(){})};wl();document.addEventListener('visibilitychange',function(){if(!document.hidden)wl()})}}catch(e){}
+loop();
+})();
+</script></body></html>

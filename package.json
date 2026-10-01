@@ -1,0 +1,13 @@
+{
+  "name": "dsh-monitor",
+  "version": "0.1.0",
+  "description": "Read-only multi-machine session monitor for DeepSeek Harness: per-machine agent, aggregating hub, and a tablet-friendly wall dashboard.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": { ".": "./lib/index.js", "./package.json": "./package.json" },
+  "files": ["lib", "cordis.patch.yml", "README.md"],
+  "license": "MIT",
+  "scripts": { "test": "node --test test/*.test.js" },
+  "engines": { "node": ">=22" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}
