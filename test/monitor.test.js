@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { startMonitor, normalizeConfig } from '../lib/server.js'
+import { startMonitor, normalizeConfig, describeBindFailure } from '../lib/server.js'
 import { createCollector } from '../lib/collect.js'
 
 const snap = (machine, running = 1) => ({ machine, generatedAt: Date.now(), sessions: [], jobs: [], pending: [], totals: { sessions: 1, running, jobsRunning: 0, pending: 0 } })
@@ -91,4 +91,18 @@ test('collector tracks activity and survives hostile services', async () => {
   const r = await handlers['approval/request']({ toolName: 'bash', agent: { id: 's1' } }, async () => { during = c.snapshot().pending.length; return 'allow' })
   assert.equal(r, 'allow'); assert.equal(during, 1); assert.equal(c.snapshot().pending.length, 0)
   handlers['session/event'](null, null) // must not throw
+})
+
+test('bind failures say what to do', async () => {
+  const ifaces = { eth0: [{ family: 'IPv4', address: '172.31.1.2' }], lo: [{ family: 'IPv6', address: '::1' }] }
+  const cfg = { host: '100.1.2.3', port: 3090 }
+  const m = describeBindFailure(cfg, { code: 'EADDRNOTAVAIL' }, ifaces)
+  assert.match(m, /100\.1\.2\.3:3090/); assert.match(m, /172\.31\.1\.2 \(eth0\)/); assert.match(m, /0\.0\.0\.0/)
+  assert.match(describeBindFailure(cfg, { code: 'EADDRINUSE' }, ifaces), /already in use/)
+  // real failure path: the server's ready promise rejects with a code we can explain
+  const bad = startMonitor({ mode: 'agent', host: '127.0.0.1', port: 0 }, { getLocalSnapshot: () => ({}) })
+  const a = await bad.ready
+  const clash = startMonitor({ mode: 'agent', host: '127.0.0.1', port: a.port }, { getLocalSnapshot: () => ({}) })
+  await assert.rejects(clash.ready, (e) => e.code === 'EADDRINUSE')
+  await clash.close(); await bad.close()
 })
